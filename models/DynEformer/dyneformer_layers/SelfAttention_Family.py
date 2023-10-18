@@ -7,7 +7,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 import math
 from math import sqrt
-from reformer_pytorch import LSHSelfAttention
 import os
 
 

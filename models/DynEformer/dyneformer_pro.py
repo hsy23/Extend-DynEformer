@@ -67,7 +67,7 @@ class DynEformer(nn.Module):
             [
                 DecoderLayer(
                     AttentionLayer(
-                        FullAttention(True, configs.factor, attention_dropout=configs.dropout, output_attention=False),
+                        FullAttention(False, configs.factor, attention_dropout=configs.dropout, output_attention=False),
                         configs.d_model, configs.n_heads),
                     AttentionLayer(
                         FullAttention(False, configs.factor, attention_dropout=configs.dropout, output_attention=False),
@@ -94,8 +94,18 @@ class DynEformer(nn.Module):
 
         if x_gp != None:
             global_padding = torch.matmul(key, x_gp.transpose(0, 1))  # dim = [batch_size, enc_len]
-            if self.if_padding:
-                x_dec[:, -self.pred_len:, 0] = global_padding[:, -self.pred_len:]  # padding
+            if self.if_padding:  # padding
+                if global_padding.shape[-1] >= self.pred_len:
+                    x_dec[:, -self.pred_len:, 0] = global_padding[:, -self.pred_len:]
+                else:
+                    # Calculate the number of times global_padding needs to be repeated to reach or exceed pred_len
+                    repeat_factor = (self.pred_len // global_padding.shape[-1]) + 1
+
+                    # Extend global_padding by repeating it along its second dimension
+                    extended_global_padding = global_padding.repeat(1, repeat_factor)
+
+                    # Merge the extended global_padding into x_dec
+                    x_dec[:, -self.pred_len:, 0] = extended_global_padding[:, -self.pred_len:]
             else:
                 x_dec[:, -self.pred_len:, 0] = 0
 

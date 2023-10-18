@@ -8,11 +8,13 @@ from torch.optim import Adam
 import itertools
 from sklearn.mixture import GaussianMixture
 from sklearn.metrics import accuracy_score
+from sklearn.metrics import adjusted_rand_score
 from scipy.optimize import linear_sum_assignment as linear_assignment
 import numpy as np
 import os
 from dataloader import get_pworkload
 import matplotlib.pyplot as plt
+from part_GMM import ImprovedIncrementalGMM as IGMM
 
 
 def cluster_acc(Y_pred, Y):
@@ -196,3 +198,73 @@ class VaDE(nn.Module):
         return -0.5*(torch.sum(np.log(np.pi*2)+log_sigma2+(x-mu).pow(2)/torch.exp(log_sigma2),1))
 
 
+class IVaDE(nn.Module):
+    def __init__(self, args, X):
+        super(IVaDE, self).__init__()
+        self.encoder = Encoder(input_dim=args.series_len)  # Replace with your Encoder
+        self.decoder = Decoder(input_dim=args.series_len)  # Replace with your Decoder
+
+        self.pi_ = nn.Parameter(torch.FloatTensor(args.nClusters, ).fill_(1) / args.nClusters, requires_grad=True)
+        self.mu_c = nn.Parameter(torch.FloatTensor(args.nClusters, args.hid_dim).fill_(0), requires_grad=True)
+        self.log_sigma2_c = nn.Parameter(torch.FloatTensor(args.nClusters, args.hid_dim).fill_(0), requires_grad=True)
+
+        self.args = args
+        self.X = X
+        self.Y = None  # Assuming no labels
+
+        self.gmm = IGMM(n_components=args.nClusters, alpha=0.5, dim=args.hid_dim)
+
+    def pre_train(self, pre_epoch=10):
+        Loss = nn.MSELoss()
+        opti = Adam(itertools.chain(self.encoder.parameters(), self.decoder.parameters()), lr=1e-3)
+
+        print('Pretraining...')
+        epoch_bar = tqdm(range(pre_epoch))
+
+        # Assuming get_pworkload is your data loader function
+        x_all_loader, X_train_all, X_train_all_np = get_pworkload(self.X, self.Y, std='minmax',
+                                                                  series_len=self.args.series_len, step=self.args.step,
+                                                                  batch_size=self.args.batch_size)
+
+        for i in epoch_bar:
+            if self.args.cuda:
+                x = X_train_all.cuda()
+
+            z, _ = self.encoder(x)
+            x_ = self.decoder(z)
+
+            loss = Loss(x, x_)
+            L = loss.item()
+
+            self.gmm.partial_fit(z.detach().cpu().numpy())
+
+            opti.zero_grad()
+            loss.backward()
+            opti.step()
+
+            epoch_bar.write('L2={:.4f}'.format(L))
+
+        self.encoder.log_sigma2_l.load_state_dict(self.encoder.mu_l.state_dict())
+
+        with torch.no_grad():
+            if self.args.cuda:
+                x = X_train_all.cuda()
+
+            z1, z2 = self.encoder(x)
+            assert F.mse_loss(z1, z2) == 0
+
+        Z = z1.detach().cpu().numpy()  # 将列表合成一个tensor
+        best_n = self.args.nClusters
+
+        gmm = GaussianMixture(n_components=self.args.nClusters, covariance_type='diag')
+        gmm_model = gmm.fit(Z.reshape(-1, 10))
+        skl_res = gmm_model.predict(Z)
+        incre_res = self.gmm.predict(Z)
+
+        ari_score = adjusted_rand_score(incre_res, skl_res)
+        print(ari_score)
+
+        # Sync parameters
+        self.pi_.data = torch.FloatTensor(self.gmm.weights_).to(self.args.device)
+        self.mu_c.data = torch.FloatTensor(self.gmm.means_).to(self.args.device)
+        self.log_sigma2_c.data = torch.log(torch.FloatTensor(self.gmm.covariances_)).to(self.args.device)

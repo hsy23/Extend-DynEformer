@@ -69,7 +69,7 @@ parser.add_argument('--use_multi_gpu', action='store_true', help='use multiple g
 parser.add_argument('--devices', type=str, default='1', help='device ids of multile gpus')
 
 # save and test
-parser.add_argument('--save_model', type=bool, default=True, help='save best model')
+parser.add_argument('--save_model', type=bool, default=False, help='save best model')
 
 def get_mape(yTrue, yPred, scaler=None):
     if scaler:
@@ -133,7 +133,7 @@ class PPIO_Dataset(Dataset):
 
 
 def get_ppio(batch_size=256):
-    X = np.load(open(r"../../data/ECW_08.npy", 'rb'), allow_pickle=True)
+    X = np.load(open(r"../../data/ECW_0809_big.npy", 'rb'), allow_pickle=True)
     y = X[:, :, 0]
 
     Xtr, ytr, Xte, yte = train_test_split(X, y)
@@ -152,9 +152,9 @@ def get_ppio(batch_size=256):
     
     return Xtr_loader, Xte_loader, yscaler
 
-device = torch.device('cuda:0')
 args = parser.parse_args()
-epochs = 300
+device = torch.device('cuda:{}'.format(args.gpu))
+epochs = 200
 used_model = 'Autoformer'
 
 if used_model == 'Informer':
@@ -162,6 +162,7 @@ if used_model == 'Informer':
 else:
     model = Autoformer(args).float()
 
+print(used_model)
 # model = nn.DataParallel(model)
 model = model.to(device)
 

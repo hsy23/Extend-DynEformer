@@ -1,4 +1,5 @@
 import pickle
+
 import numpy as np
 import torch
 from torchvision.datasets import MNIST
@@ -13,7 +14,7 @@ from series_decomp import s_decomp
 from tqdm import tqdm
 
 
-def get_pworkload(X, Y, wtype='train', std=None, series_len=24*2, step=12, batch_size=256):
+def get_pworkload(X_raw, Y, wtype='train', std=None, series_len=24*2, step=12, batch_size=256):
     '''
         Args:
         X (array like): shape (num_samples, num_features, num_periods)
@@ -22,20 +23,24 @@ def get_pworkload(X, Y, wtype='train', std=None, series_len=24*2, step=12, batch
         seq_len (int): sequence/encoder/decoder length
         batch_size (int)
         '''
+    X = X_raw
     if type(X) == list:
         X = np.asarray(X)
     num_ts, num_periods = X.shape
+
     new_X = []
+    print('**********************begin decompose******************************')
     for s in tqdm(X):  # If the data requires additional processing for timing decomposition
         new_X.append(s_decomp(s, type='seasonal'))
+    new_X = np.asarray(new_X)
 
     if wtype == 'train':
         scaler = MinMaxScaler()
-        new_X = scaler.fit_transform(X.T).T
+        new_X = scaler.fit_transform(new_X.T).T
         pickle.dump(scaler, open('pool_scaler.pkl', 'wb'))
     else:
         scaler = pickle.load(open('pool_scaler.pkl', 'rb'))
-        new_X = scaler.transform(X.T).T
+        new_X = scaler.transform(new_X.T).T
 
     X_train_all = []
     for i in range(num_ts):
